@@ -40,13 +40,13 @@ def tren_stok():
         text(
             f"""SELECT pa.TglPelayanan AS Tgl, pa.JmlBarang AS Jml, 
 			pa.HargaSatuan, pa.HargaSatuan*pa.JmlBarang AS Total
-			FROM rsudtasikmalaya.dbo.PemakaianAlkes pa
+			FROM dbo.PemakaianAlkes pa
             WHERE datepart(year,[TglPelayanan]) = {tahun-1}
             OR datepart(year,[TglPelayanan]) = {tahun}
 			UNION ALL
 			SELECT aj.TglPelayanan AS Tgl, aj.JmlBarang AS Jml, 
 			aj.HargaSatuan, aj.HargaSatuan*aj.JmlBarang AS Total
-			FROM rsudtasikmalaya.dbo.ApotikJual aj 
+			FROM dbo.ApotikJual aj 
             WHERE datepart(year,[TglPelayanan]) = {tahun-1}
             OR datepart(year,[TglPelayanan]) = {tahun}
            	ORDER BY Tgl ASC;"""))
@@ -82,12 +82,12 @@ def stock_supplier():
     result = engine.execute(
         text(
             f"""SELECT st.TglTerima, s.NamaSupplier, dov.jmlorder, ts.TotalBiaya+ts.TotalPpn as TotalBayar
-            FROM rsudtasikmalaya.dbo.DetailOrderVerif dov
-            INNER JOIN rsudtasikmalaya.dbo.TagihanSupplier ts
+            FROM dbo.DetailOrderVerif dov
+            INNER JOIN dbo.TagihanSupplier ts
             ON dov.NoTerima = ts.NoTerima
-            INNER JOIN rsudtasikmalaya.dbo.StrukTerima st
+            INNER JOIN dbo.StrukTerima st
             ON ts.NoTerima = st.NoTerima
-            INNER JOIN rsudtasikmalaya.dbo.Supplier s
+            INNER JOIN dbo.Supplier s
             ON st.KdSupplier = s.KdSupplier
             WHERE st.TglTerima >= '{tgl_awal}'
             AND st.TglTerima < '{tgl_akhir + timedelta(days=1)}'
@@ -124,7 +124,7 @@ def top_produk():
         text(
             f"""SELECT vhpa.TglTransaksi, vhpa.NamaBarang, vhpa.StokAwal, 
 			 vhpa.StokAwal-vhpa.StokAkhir AS Penggunaan, vhpa.StokAkhir 
-			 FROM rsudtasikmalaya.dbo.V_H_PemakaianAlkes vhpa
+			 FROM dbo.V_H_PemakaianAlkes vhpa
 			 WHERE vhpa.TglTransaksi >= '{tgl_awal}'
            	 AND vhpa.TglTransaksi < '{tgl_akhir + timedelta(days=1)}'
            	 ORDER BY vhpa.NamaBarang, vhpa.TglTransaksi ASC;"""))
@@ -164,7 +164,7 @@ def jenis_produk():
     result = engine.execute(
         text(
             f"""SELECT vdsbmr.TglClosing, vdsbmr.JenisBarang, vdsbmr.StokReal 
-			 FROM rsudtasikmalaya.dbo.V_DataStokBarangMedisRekap vdsbmr 
+			 FROM dbo.V_DataStokBarangMedisRekap vdsbmr 
 			 WHERE vdsbmr.TglClosing >= '{tgl_awal}'
            	 AND vdsbmr.TglClosing < '{tgl_akhir + timedelta(days=1)}'
            	 ORDER BY vdsbmr.TglClosing ASC;"""))
@@ -198,7 +198,7 @@ def jenis_aset():
     result = engine.execute(
         text(
             f"""SELECT vdsbnmr.TglClosing, vdsbnmr.JenisBarang, vdsbnmr.StokReal 
-			 FROM rsudtasikmalaya.dbo.V_DataStokBarangNonMedisRekapx vdsbnmr  
+			 FROM dbo.V_DataStokBarangNonMedisRekapx vdsbnmr  
 			 WHERE vdsbnmr.TglClosing >= '{tgl_awal}'
            	 AND vdsbnmr.TglClosing < '{tgl_akhir + timedelta(days=1)}'
            	 ORDER BY vdsbnmr.TglClosing ASC;"""))
@@ -233,7 +233,7 @@ def detail_stok():
         text(
             f"""SELECT vdsbmr.TglClosing, vdsbmr.JenisBarang, vdsbmr.NamaBarang, 
             vdsbmr.AsalBarang, vdsbmr.StokReal, vdsbmr.TotalNetto1
-			 FROM rsudtasikmalaya.dbo.V_DataStokBarangMedisRekap vdsbmr 
+			 FROM dbo.V_DataStokBarangMedisRekap vdsbmr 
 			 WHERE vdsbmr.TglClosing >= '{tgl_awal}'
            	 AND vdsbmr.TglClosing < '{tgl_akhir + timedelta(days=1)}'
            	 ORDER BY vdsbmr.TglClosing ASC;"""))
