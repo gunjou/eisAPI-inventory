@@ -27,12 +27,12 @@ def get_default_date(tgl_awal, tgl_akhir):
     return tgl_awal, tgl_akhir
 
 
-@inventory_bp.route('/stok_card')
+@inventory_bp.route('/inventory/stok_card')
 def stok_card():
     return jsonify({"message": "ini data stok card"})
 
 
-@inventory_bp.route('/tren_stok')
+@inventory_bp.route('/inventory/tren_stok')
 def tren_stok():
     tgl_awal = request.args.get('tgl_awal')
     tahun = datetime.now().year if tgl_awal == None else int(tgl_awal[:4])
@@ -74,7 +74,7 @@ def tren_stok():
     return jsonify(data)
 
 
-@inventory_bp.route('/stok_supplier')
+@inventory_bp.route('/inventory/stok_supplier')
 def stock_supplier():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -115,7 +115,7 @@ def stock_supplier():
     return jsonify(result)
 
 
-@inventory_bp.route('/top_produk')
+@inventory_bp.route('/inventory/top_produk')
 def top_produk():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -156,7 +156,7 @@ def top_produk():
     return jsonify(result)
 
 
-@inventory_bp.route('/jenis_produk')
+@inventory_bp.route('/inventory/jenis_produk')
 def jenis_produk():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -190,7 +190,7 @@ def jenis_produk():
     return jsonify(result)
 
 
-@inventory_bp.route('/jenis_aset')
+@inventory_bp.route('/inventory/jenis_aset')
 def jenis_aset():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -224,7 +224,7 @@ def jenis_aset():
     return jsonify(result)
 
 
-@inventory_bp.route('/detail_stok')
+@inventory_bp.route('/inventory/detail_stok')
 def detail_stok():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
