@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from api.config import MONTH_ID as month_id
 from api.config import get_connection
+from api.query import *
 
 inventory_bp = Blueprint('inventory', __name__)
 engine = get_connection()
@@ -14,17 +15,30 @@ engine = get_connection()
 
 def get_default_date(tgl_awal, tgl_akhir):
     if tgl_awal == None:
-        tgl_awal = datetime.today() - relativedelta(months=1)
-        tgl_awal = datetime.strptime(tgl_awal.strftime('%Y-%m-%d'), '%Y-%m-%d')
+        tgl_awal = datetime.strptime((datetime.today() - relativedelta(months=1)).strftime('%Y-%m-%d'), '%Y-%m-%d')
     else:
         tgl_awal = datetime.strptime(tgl_awal, '%Y-%m-%d')
 
     if tgl_akhir == None:
-        tgl_akhir = datetime.strptime(
-            datetime.today().strftime('%Y-%m-%d'), '%Y-%m-%d')
+        tgl_akhir = datetime.strptime(datetime.today().strftime('%Y-%m-%d'), '%Y-%m-%d')
     else:
         tgl_akhir = datetime.strptime(tgl_akhir, '%Y-%m-%d')
     return tgl_awal, tgl_akhir
+
+
+def get_date_prev(tgl_awal, tgl_akhir):
+    tgl_awal = tgl_awal - relativedelta(months=1)
+    tgl_awal = tgl_awal.strftime('%Y-%m-%d')
+    tgl_akhir = tgl_akhir - relativedelta(months=1)
+    tgl_akhir = tgl_akhir.strftime('%Y-%m-%d')
+    return tgl_awal, tgl_akhir
+
+
+def count_values(data, param):
+    cnt = Counter()
+    for i in range(len(data)):
+        cnt[data[i][param]] += float(data[i]['total'])
+    return cnt
 
 
 @inventory_bp.route('/inventory/stok_card')
@@ -36,20 +50,9 @@ def stok_card():
 def tren_stok():
     tgl_awal = request.args.get('tgl_awal')
     tahun = datetime.now().year if tgl_awal == None else int(tgl_awal[:4])
-    result = engine.execute(
-        text(
-            f"""SELECT pa.TglPelayanan AS Tgl, pa.JmlBarang AS Jml, 
-			pa.HargaSatuan, pa.HargaSatuan*pa.JmlBarang AS Total
-			FROM dbo.PemakaianAlkes pa
-            WHERE datepart(year,[TglPelayanan]) = {tahun-1}
-            OR datepart(year,[TglPelayanan]) = {tahun}
-			UNION ALL
-			SELECT aj.TglPelayanan AS Tgl, aj.JmlBarang AS Jml, 
-			aj.HargaSatuan, aj.HargaSatuan*aj.JmlBarang AS Total
-			FROM dbo.ApotikJual aj 
-            WHERE datepart(year,[TglPelayanan]) = {tahun-1}
-            OR datepart(year,[TglPelayanan]) = {tahun}
-           	ORDER BY Tgl ASC;"""))
+    
+    # Get query result
+    result = query_tren_stok(tahun)
 
     tren = {}
     for i in range(1, 13):
@@ -76,40 +79,44 @@ def tren_stok():
 
 @inventory_bp.route('/inventory/stok_supplier')
 def stock_supplier():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(
-            f"""SELECT st.TglTerima, s.NamaSupplier, dov.jmlorder, ts.TotalBiaya+ts.TotalPpn as TotalBayar
-            FROM dbo.DetailOrderVerif dov
-            INNER JOIN dbo.TagihanSupplier ts
-            ON dov.NoTerima = ts.NoTerima
-            INNER JOIN dbo.StrukTerima st
-            ON ts.NoTerima = st.NoTerima
-            INNER JOIN dbo.Supplier s
-            ON st.KdSupplier = s.KdSupplier
-            WHERE st.TglTerima >= '{tgl_awal}'
-            AND st.TglTerima < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY st.TglTerima ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglTerima'],
-            "supplier": row['NamaSupplier'],
-            "total": row['TotalBayar'],
-            "jumlah": row['jmlorder'],
-            "judul": 'Stok per Supplier',
-            "label": 'Inventory'
-        })
-    cnt = Counter()
-    for i in range(len(data)):
-        cnt[data[i]['supplier']] += data[i]['jumlah']
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
 
+    # Get query result
+    result = query_stok_supplier(tgl_awal, tgl_akhir + timedelta(days=1))
+    result_prev = query_stok_supplier(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglTerima'], "supplier": row['NamaSupplier'], "total": row['TotalBayar'], "jumlah": row['jmlorder']} for row in result]
+    tmp_prev = [{"tanggal": row['TglTerima'], "supplier": row['NamaSupplier'], "total": row['TotalBayar'], "jumlah": row['jmlorder']} for row in result_prev]
+
+    
+    # Extract data as (dataframe)
+    cnts = count_values(tmp, 'supplier')
+    cnts_prev = count_values(tmp_prev, 'supplier')
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+    
+    # Define return result as a json
     result = {
         "judul": 'Stok per Supplier',
         "label": 'Inventory',
-        "supplier": cnt,
+        "data": data,
         "tgl_filter": {"tgl_awal": tgl_awal, "tgl_akhir": tgl_akhir}
     }
     return jsonify(result)
@@ -117,40 +124,38 @@ def stock_supplier():
 
 @inventory_bp.route('/inventory/top_produk')
 def top_produk():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(
-            f"""SELECT vhpa.TglTransaksi, vhpa.NamaBarang, vhpa.StokAwal, 
-			 vhpa.StokAwal-vhpa.StokAkhir AS Penggunaan, vhpa.StokAkhir 
-			 FROM dbo.V_H_PemakaianAlkes vhpa
-			 WHERE vhpa.TglTransaksi >= '{tgl_awal}'
-           	 AND vhpa.TglTransaksi < '{tgl_akhir + timedelta(days=1)}'
-           	 ORDER BY vhpa.NamaBarang, vhpa.TglTransaksi ASC;"""))
     
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglTransaksi'],
+    # Get query result
+    result = query_top_produk(tgl_awal, tgl_akhir + timedelta(days=1))
+
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglTransaksi'],
             "item": row['NamaBarang'],
             "stok_awal": row['StokAwal'],
             "stok_akhir": row['StokAkhir'],
-            "penggunaan": row['Penggunaan'],
-            "judul": 'Top Produk',
-            "label": 'Inventory'
-        })
-    cnt = Counter()
-    for i in range(len(data)):
-        try:
-            cnt[data[i]['item']] += data[i]['penggunaan']
-        except:
-            pass
+            "penggunaan": row['Penggunaan'],} for row in result]
 
+    # Define trend percentage
+    stock, stock_in, stock_out = Counter(), Counter(), Counter()
+    for i in range(len(tmp)):
+        stock[tmp[i]['item']] += tmp[i]['stok_akhir']
+        stock_in[tmp[i]['item']] += tmp[i]['stok_awal']
+        stock_out[tmp[i]['item']] += tmp[i]['penggunaan']
+    data = [{"name": x, "stock": y}#, "in": j, "out": k} 
+            for x, y in stock.items()
+            # for _, j in stock_in.items()
+            # for _, k in stock_out.items()
+            ]
+
+    # Define return result as a json
     result = {
         "judul": 'Top Produk',
         "label": 'Inventory',
-        "item": cnt,
+        "data": data,
         "tgl_filter": {"tgl_awal": tgl_awal, "tgl_akhir": tgl_akhir}
     }
     return jsonify(result)
@@ -158,33 +163,48 @@ def top_produk():
 
 @inventory_bp.route('/inventory/jenis_produk')
 def jenis_produk():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(
-            f"""SELECT vdsbmr.TglClosing, vdsbmr.JenisBarang, vdsbmr.StokReal 
-			 FROM dbo.V_DataStokBarangMedisRekap vdsbmr 
-			 WHERE vdsbmr.TglClosing >= '{tgl_awal}'
-           	 AND vdsbmr.TglClosing < '{tgl_akhir + timedelta(days=1)}'
-           	 ORDER BY vdsbmr.TglClosing ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglClosing'],
-            "jenis": row['JenisBarang'],
-            "stok": row['StokReal'],
-            "judul": 'Stok per Jenis Barang',
-            "label": 'Inventory'
-        })
-    cnt = Counter()
-    for i in range(len(data)):
-        cnt[data[i]['jenis']] = data[i]['stok']
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
 
+    # Get query result
+    result = query_jenis_produk(tgl_awal, tgl_akhir + timedelta(days=1))
+    result_prev = query_jenis_produk(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglClosing'], "jenis": row['JenisBarang'], "stok": row['StokReal']} for row in result]
+    tmp_prev = [{"tanggal": row['TglClosing'], "jenis": row['JenisBarang'], "stok": row['StokReal']} for row in result_prev]
+
+
+    # Extract data as (dataframe)
+    cnts, cnts_prev = Counter(), Counter()
+    for i in range(len(tmp)):
+        cnts[tmp[i]['jenis']] += tmp[i]['stok']
+    for i in range(len(tmp_prev)):
+        cnts_prev[tmp_prev[i]['jenis']] += tmp_prev[i]['stok']
+
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+    
+    # Define return result as a json
     result = {
         "judul": 'Stok per Jenis Barang',
         "label": 'Inventory',
-        "supplier": cnt,
+        "data": data,
         "tgl_filter": {"tgl_awal": tgl_awal, "tgl_akhir": tgl_akhir}
     }
     return jsonify(result)
@@ -192,33 +212,47 @@ def jenis_produk():
 
 @inventory_bp.route('/inventory/jenis_aset')
 def jenis_aset():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(
-            f"""SELECT vdsbnmr.TglClosing, vdsbnmr.JenisBarang, vdsbnmr.StokReal 
-			 FROM dbo.V_DataStokBarangNonMedisRekapx vdsbnmr  
-			 WHERE vdsbnmr.TglClosing >= '{tgl_awal}'
-           	 AND vdsbnmr.TglClosing < '{tgl_akhir + timedelta(days=1)}'
-           	 ORDER BY vdsbnmr.TglClosing ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglClosing'],
-            "jenis": row['JenisBarang'],
-            "stok": row['StokReal'],
-            "judul": 'Stok per Jenis Barang',
-            "label": 'Inventory'
-        })
-    cnt = Counter()
-    for i in range(len(data)):
-        cnt[data[i]['jenis']] = data[i]['stok']
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
 
+    # Get query result
+    result = query_jenis_aset(tgl_awal, tgl_akhir + timedelta(days=1))
+    result_prev = query_jenis_aset(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglClosing'], "jenis": row['JenisBarang'], "stok": row['StokReal']} for row in result]
+    tmp_prev = [{"tanggal": row['TglClosing'], "jenis": row['JenisBarang'], "stok": row['StokReal']} for row in result_prev]
+
+    # Extract data as (dataframe)
+    cnts, cnts_prev = Counter(), Counter()
+    for i in range(len(tmp)):
+        cnts[tmp[i]['jenis']] += tmp[i]['stok']
+    for i in range(len(tmp_prev)):
+        cnts_prev[tmp_prev[i]['jenis']] += tmp_prev[i]['stok']
+
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+    
+    # Define return result as a json
     result = {
         "judul": 'Stok per Jenis Barang',
         "label": 'Inventory',
-        "supplier": cnt,
+        "data": data,
         "tgl_filter": {"tgl_awal": tgl_awal, "tgl_akhir": tgl_akhir}
     }
     return jsonify(result)
@@ -226,21 +260,18 @@ def jenis_aset():
 
 @inventory_bp.route('/inventory/detail_stok')
 def detail_stok():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(
-            f"""SELECT vdsbmr.TglClosing, vdsbmr.JenisBarang, vdsbmr.NamaBarang, 
-            vdsbmr.AsalBarang, vdsbmr.StokReal, vdsbmr.TotalNetto1
-			 FROM dbo.V_DataStokBarangMedisRekap vdsbmr 
-			 WHERE vdsbmr.TglClosing >= '{tgl_awal}'
-           	 AND vdsbmr.TglClosing < '{tgl_akhir + timedelta(days=1)}'
-           	 ORDER BY vdsbmr.TglClosing ASC;"""))
-    data, nama_barang = [], []
+
+    # Get query result
+    result = query_detail_stok(tgl_awal, tgl_akhir + timedelta(days=1))
+
+    tmp, nama_barang = [], []
     for row in result:
         nama_barang.append(row['NamaBarang'])
-        data.append({
+        tmp.append({
             "tanggal": row['TglClosing'],
             "jenis": row['JenisBarang'],
             "nama": row['NamaBarang'],
@@ -252,19 +283,19 @@ def detail_stok():
         })
     
     cnt = Counter()
-    for i in range(len(data)):
-        cnt[data[i]['nama']] = {
-            "stok": data[i]['stok'],
-            "jenis": data[i]['jenis'],
-            "harga": data[i]['harga'],
-            "total_harga": data[i]['harga'] * data[i]['stok'],
+    for i in range(len(tmp)):
+        cnt[tmp[i]['nama']] = {
+            "stok": tmp[i]['stok'],
+            "jenis": tmp[i]['jenis'],
+            "harga": tmp[i]['harga'],
+            "total_harga": tmp[i]['harga'] * tmp[i]['stok'],
             "status": None
         } 
 
     result = {
         "judul": 'Stok per Jenis Barang',
         "label": 'Inventory',
-        "detail": cnt,
+        "data": cnt,
         "tgl_filter": {"tgl_awal": tgl_awal, "tgl_akhir": tgl_akhir}
     }
     return jsonify(result)
